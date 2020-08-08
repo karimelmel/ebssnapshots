@@ -1,0 +1,186 @@
+{
+    "AWSTemplateFormatVersion": "2010-09-09",
+    "Description": "EBS Backup and Cleanup",
+    "Resources": {
+        "LambdaEbsBackupRole": {
+            "Type": "AWS::IAM::Role",
+            "Properties": {
+                "AssumeRolePolicyDocument": {
+                    "Version": "2012-10-17",
+                    "Statement": [
+                        {
+                            "Effect": "Allow",
+                            "Principal": {
+                                "Service": [
+                                    "lambda.amazonaws.com"
+                                ]
+                            },
+                            "Action": [
+                                "sts:AssumeRole"
+                            ]
+                        }
+                    ]
+                },
+                "Path": "/"
+            }
+        },
+        "EbsBackupExecutionPolicy": {
+            "DependsOn": [
+                "LambdaEbsBackupRole"
+            ],
+            "Type": "AWS::IAM::Policy",
+            "Properties": {
+                "PolicyName": "LambdaEbsBackupPolicy",
+                "Roles": [
+                    {
+                        "Ref": "LambdaEbsBackupRole"
+                    }
+                ],
+                "PolicyDocument": {
+                    "Version": "2012-10-17",
+                    "Statement": [
+                        {
+                            "Effect": "Allow",
+                            "Action": [
+                                "logs:*"
+                            ],
+                            "Resource": [
+                                "arn:aws:logs:*:*:*"
+                            ]
+                        },
+                        {
+                            "Effect": "Allow",
+                            "Action": [
+                                "ec2:Describe*",
+                                "ec2:CreateSnapshot",
+                                "ec2:DeleteSnapshot",
+                                "ec2:CreateTags",
+                                "ec2:ModifySnapshotAttribute",
+                                "ec2:ResetSnapshotAttribute"
+                            ],
+                            "Resource": [
+                                "*"
+                            ]
+                        }
+                    ]
+                }
+            }
+        },
+        "EbsSnapshotScheduler": {
+            "Type": "AWS::Events::Rule",
+            "Properties": {
+                "Name": "ScheduleEBSSnapshots",
+                "Description": "Schedules EBS snapshots every day",
+                "ScheduleExpression": "rate(1 day)",
+                "Targets": [
+                    {
+                        "Id": "ScheduleEBSSnapshotsTarget",
+                        "Arn": {
+                            "Fn::GetAtt": [
+                                "EbsSnapshot",
+                                "Arn"
+                            ]
+                        }
+                    }
+                ]
+            }
+        },
+        "EbsSnapshotSchedulerPolicy": {
+            "Type": "AWS::Lambda::Permission",
+            "Properties": {
+                "FunctionName": {
+                    "Ref": "EbsSnapshot"
+                },
+                "Action": "lambda:InvokeFunction",
+                "Principal": "events.amazonaws.com",
+                "SourceArn": {
+                    "Fn::GetAtt": [
+                        "EbsSnapshotScheduler",
+                        "Arn"
+                    ]
+                }
+            }
+        },
+        "EbsSnapshotCleanerScheduler": {
+            "Type": "AWS::Events::Rule",
+            "Properties": {
+                "Name": "ScheduleEBSCleaner",
+                "Description": "Schedules EBS cleaner every day",
+                "ScheduleExpression": "rate(10 minutes)",
+                "Targets": [
+                    {
+                        "Id": "ScheduleEBSCleanerTarget",
+                        "Arn": {
+                            "Fn::GetAtt": [
+                                "EbsSnapshotCleaner",
+                                "Arn"
+                            ]
+                        }
+                    }
+                ]
+            }
+        },
+        "EbsCleanerSchedulerPolicy": {
+            "Type": "AWS::Lambda::Permission",
+            "Properties": {
+                "FunctionName": {
+                    "Ref": "EbsSnapshotCleaner"
+                },
+                "Action": "lambda:InvokeFunction",
+                "Principal": "events.amazonaws.com",
+                "SourceArn": {
+                    "Fn::GetAtt": [
+                        "EbsSnapshotCleanerScheduler",
+                        "Arn"
+                    ]
+                }
+            }
+        },
+        "EbsSnapshot": {
+            "Type": "AWS::Lambda::Function",
+            "DependsOn": [
+                "LambdaEbsBackupRole",
+                "EbsBackupExecutionPolicy"
+            ],
+            "Properties": {
+                "Code": {
+                    "S3Bucket": "staging-kem13",
+                    "S3Key": "lambda/snapshot.zip"
+                },
+                "Role": {
+                    "Fn::GetAtt": [
+                        "LambdaEbsBackupRole",
+                        "Arn"
+                    ]
+                },
+                "Timeout": 60,
+                "Handler": "snapshot.lambda_handler",
+                "Runtime": "python3.8",
+                "MemorySize": 128
+            }
+        },
+        "EbsSnapshotCleaner": {
+            "Type": "AWS::Lambda::Function",
+            "DependsOn": [
+                "LambdaEbsBackupRole",
+                "EbsBackupExecutionPolicy"
+            ],
+            "Properties": {
+                "Code": {
+                    "S3Bucket": "staging-kem13",
+                    "S3Key": "lambda/cleaner.zip"
+                },
+                "Role": {
+                    "Fn::GetAtt": [
+                        "LambdaEbsBackupRole",
+                        "Arn"
+                    ]
+                },
+                "Timeout": 60,
+                "Handler": "cleaner.lambda_handler",
+                "Runtime": "python3.8",
+                "MemorySize": 128
+            }
+        }
+    }
+}
